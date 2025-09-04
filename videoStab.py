@@ -157,6 +157,8 @@ while True:
     yumusak_x = np.mean(pencere_dx)
     yumusak_y = np.mean(pencere_dy)
     yumusak_aci = np.mean(pencere_dteta)
+    smoothed_plot_data.append([yumusak_x, yumusak_y, yumusak_aci])
+
 
     ## ----YUMUŞATMA HESAPLAMALARI SON ----
 
@@ -191,11 +193,10 @@ while True:
 
 
     karsilastirma_frame = np.hstack((frame,stabilize_edilmis_frame))
-    #orj_stab = np.hstack((frame,stabilize_frame))
-    #cv2.imshow("orijinal vs stabilize", orj_stab) 
-    cv2.imshow("STAB",karsilastirma_frame)
+    #cv2.imshow("KARŞILAŞTIRMA",karsilastirma_frame) 
+    cv2.imshow("STAB",stabilize_edilmis_frame)
     
-    ##cv2.estimateAffinePartial2D
+    #cv2.estimateAffinePartial2D
     
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
