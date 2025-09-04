@@ -150,23 +150,14 @@ while True:
     yumusak_dy = 0
     yumusak_dteta = 0
     
-    if kuyruk_dx.boyut() >= pencere_boyutu:
-        ## yeterli veri varsa rolling mean hesapla
-        ## burada yapılan şey sıralarımız içindeki son elemanı almak
-        pencere_dx = kuyruk_dx.son_N_eleman(pencere_boyutu)
-        pencere_dy = kuyruk_dy.son_N_eleman(pencere_boyutu)
-        pencere_dteta = kuyruk_dteta.son_N_eleman(pencere_boyutu)
-        
-        yumusak_x = np.mean(pencere_dx)
-        yumusak_y = np.mean(pencere_dy)
-        yumusak_aci = np.mean(pencere_dteta)
-    else:
-        # yeterli veri olmadııgı için ilk değerlerideyiz
-        yumusak_x = x
-        yumusak_y = y
-        yumusak_aci = aci_toplam
-        
-    smoothed_plot_data.append([yumusak_x, yumusak_y, yumusak_aci])
+    pencere_dx = kuyruk_dx.son_N_eleman(pencere_boyutu)
+    pencere_dy = kuyruk_dy.son_N_eleman(pencere_boyutu)
+    pencere_dteta = kuyruk_dteta.son_N_eleman(pencere_boyutu)
+    
+    yumusak_x = np.mean(pencere_dx)
+    yumusak_y = np.mean(pencere_dy)
+    yumusak_aci = np.mean(pencere_dteta)
+
     ## ----YUMUŞATMA HESAPLAMALARI SON ----
 
 
@@ -228,6 +219,3 @@ plt.show()
 
 cap.release()
 cv2.destroyAllWindows()
-
-
-   
