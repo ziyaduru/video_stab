@@ -3,6 +3,7 @@ import numpy as np
 from kuyruk_kutuphane.kuyruk import Kuyruk
 import matplotlib.pyplot as plt
 
+
 def plot_trajectory(titrek_yol, purusuz_yol):
    if titrek_yol is None:
        raise AttributeError("çizilecek bir yörünge verisi yok") 
@@ -49,7 +50,21 @@ def plot_transforms(donusumler, radians=False):
         ax2.legend()
 
         fig.canvas.manager.set_window_title('Dönüşüm Grafiği')  
-    
+
+
+def plot_scale_both(smoothed, raw_scale):
+    if smoothed.shape[1] < 4:
+        raise ValueError("smoothed verisinde scale (4. sütun) yok.")
+    with plt.style.context('ggplot'):
+        fig, ax = plt.subplots()
+        ax.plot(raw_scale, label='s_toplam (ham)')
+        ax.plot(smoothed[:, 3], label='s (yumuşatılmış)')
+        ax.axhline(1.0, linestyle='--', linewidth=1, label='s = 1')
+        ax.set_title('Ölçek (Scale) Eğrisi')
+        ax.set_xlabel('Kare Sayısı')
+        ax.set_ylabel('Ölçek (s)')
+        ax.legend()
+        fig.canvas.manager.set_window_title('Scale Grafiği')
 
 
 
@@ -58,13 +73,13 @@ cap = cv2.VideoCapture(0)
 
 gftt_params = dict (
     maxCorners = 400,
-    qualityLevel = 0.1,
+    qualityLevel = 0.01,
     minDistance = 7,
     blockSize = 7)
 
 lk_params = dict(
-    winSize = (15,15),
-    maxLevel = 2,
+    winSize = (21,21),
+    maxLevel = 3,
     criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
     
 color = np.random.randint(0,255, (100,3))
@@ -80,6 +95,8 @@ mask = np.zeros_like(old_frame)
 kuyruk_dx = Kuyruk()
 kuyruk_dy = Kuyruk()
 kuyruk_dteta = Kuyruk()
+kuyruk_s = Kuyruk()
+
 
 ham_kare_kuyruk = Kuyruk()
 transform_kuyruk = Kuyruk()
@@ -87,11 +104,15 @@ transform_kuyruk = Kuyruk()
 transform_plot_data = []
 trajectory_plot_data = []
 smoothed_plot_data = []
+scale_history = []
+
 
 
 x = 0
 y = 0
 aci_toplam = 0
+s_toplam = 1.0
+
 
 while True:
     ret, frame = cap.read()
@@ -121,7 +142,25 @@ while True:
     #bfill rolling mean
     # ORTALAMA HAREKETİ HESAPLA
     
-    M,_ = cv2.estimateAffinePartial2D(good_old, good_new)
+    #M,_ = cv2.estimateAffinePartial2D(good_old, good_new)
+
+    M, inliers = cv2.estimateAffinePartial2D(
+        good_old, good_new,
+        method = cv2.RANSAC,
+        ransacReprojThreshold = 3,
+        maxIters = 2000,
+        confidence = 0.99,
+        refineIters = 10
+    )
+
+    if M is None or inliers is None or inliers.sum() < 20:
+        p0 = cv2.goodFeaturesToTrack(frame_gray, mask=None, **gftt_params)
+        cv2.imshow("Stabilize görüntü",frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+        old_gray = frame_gray.copy()
+        continue    
+    # M 2x3 dönüşüm matrisidir
 
     # matrisin yapısı
     # M = [[cos(teta), -sin(teta), dx],
@@ -130,17 +169,24 @@ while True:
     dx = M[0,2]
     dy = M[1,2]
     d_teta = np.arctan2(M[1,0],M[0,0]) ## arctan ile mevcut açı değerini hesaplar
+    s = np.hypot(M[0,0], M[1,0])  # ölçek faktörü hesaplama
     #cv2.getRotationMatrix()
+
     transform_plot_data.append([dx,dy,d_teta])
+    
     x += dx
     y += dy
     aci_toplam += d_teta
+    s_toplam *= s
+    
+    scale_history.append(s_toplam)
     trajectory_plot_data.append([x,y,aci_toplam])
     
 
     kuyruk_dx.ekle(x)
     kuyruk_dy.ekle(y)
     kuyruk_dteta.ekle(aci_toplam)
+    kuyruk_s.ekle(s_toplam)
     
 
 
@@ -153,11 +199,13 @@ while True:
     pencere_dx = kuyruk_dx.son_N_eleman(pencere_boyutu)
     pencere_dy = kuyruk_dy.son_N_eleman(pencere_boyutu)
     pencere_dteta = kuyruk_dteta.son_N_eleman(pencere_boyutu)
+    pencere_s = kuyruk_s.son_N_eleman(pencere_boyutu)
     
     yumusak_x = np.mean(pencere_dx)
     yumusak_y = np.mean(pencere_dy)
     yumusak_aci = np.mean(pencere_dteta)
-    smoothed_plot_data.append([yumusak_x, yumusak_y, yumusak_aci])
+    yumusak_s   = np.mean(pencere_s) 
+    smoothed_plot_data.append([yumusak_x, yumusak_y, yumusak_aci, yumusak_s])
 
 
     ## ----YUMUŞATMA HESAPLAMALARI SON ----
@@ -175,9 +223,11 @@ while True:
     
     cos_aci = np.cos(aci)
     sin_aci = np.sin(aci)
+
+    fark_s = yumusak_s / s_toplam
     
-    M_yumusak = np.float32([[cos_aci, -sin_aci, tx],
-                            [sin_aci, cos_aci,   ty]])
+    M_yumusak = np.float32([[fark_s*cos_aci, -fark_s*sin_aci, tx],
+                            [fark_s*sin_aci, fark_s*cos_aci,   ty]])
     transform_kuyruk.ekle(M_yumusak)
     ham_kare_kuyruk.ekle(frame)
     
@@ -202,10 +252,10 @@ while True:
         break
     
     
-    
-    old_gray = frame_gray.copy()    
     p0 = good_new.reshape(-1,1,2)
-    p0 = cv2.goodFeaturesToTrack(old_gray, mask=None, **gftt_params)
+    old_gray = frame_gray.copy()    
+    if p0.shape[0] < 200:
+        p0 = cv2.goodFeaturesToTrack(old_gray, mask=None, **gftt_params)
     
 # --- GRAFİK ÇİZİMİ ----
 
@@ -214,7 +264,7 @@ puruzsuz_yol_dizisi = np.array(smoothed_plot_data)
 donusumer_dizisi = np.array(transform_plot_data)
 
 plot_trajectory(titrek_yol_dizisi, puruzsuz_yol_dizisi)
-
+plot_scale_both(puruzsuz_yol_dizisi, scale_history)
 plot_transforms(donusumer_dizisi)
 plt.show()        
 
