@@ -227,7 +227,7 @@ while True:
     fark_s = yumusak_s / s_toplam
     
     M_yumusak = np.float32([[fark_s*cos_aci, -fark_s*sin_aci, tx],
-                            [fark_s*sin_aci, fark_s*cos_aci,   ty]])
+                            [fark_s*sin_aci, fark_s*cos_aci,  ty]])
     transform_kuyruk.ekle(M_yumusak)
     ham_kare_kuyruk.ekle(frame)
     
