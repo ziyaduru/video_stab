@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import time
 import csv
 from dataclasses import dataclass
-
+import pandas as pd
 
 @dataclass
 class LogRow:
@@ -30,91 +30,21 @@ class stabLogger:
         self.n = 0
 
     def write(self, row:LogRow):
-        def f(x):
-        # NaN kontrolü
-            if isinstance(x, float):
-                return f"{x:.3f}"
-            return x
-    
+
         self.w.writerow([
-            row.frame, f(row.t_sec),
-            f(row.x_raw), f(row.y_raw), f(row.teta_raw), f(row.scale_raw),
-            f(row.x_s), f(row.y_s), f(row.teta_s), f(row.scale_s),
-            f(row.dx), f(row.dy), f(row.d_teta),
+            row.frame, row.t_sec,
+            row.x_raw, row.y_raw, row.teta_raw, row.scale_raw,
+            row.x_s, row.y_s, row.teta_s, row.scale_s,
+            row.dx, row.dy, row.d_teta,
             row.inliers
-        ])
+            ])
         self.n += 1
         if self.n % 60 == 0:
-           self.f.flush()
+            self.f.flush()
 
     def close(self):
         self.f.flush()
         self.f.close()
-
-
-def plot_trajectory(titrek_yol, purusuz_yol):
-   if titrek_yol is None:
-       raise AttributeError("çizilecek bir yörünge verisi yok") 
-   with plt.style.context('ggplot'):
-       fig, (ax1, ax2) = plt.subplots(nrows=2, sharex='all')
-       fig.suptitle("Kamera Yörüngesi",fontsize=16)
-
-       ax1.plot(titrek_yol[:, 0], label='Titrek Yol (X)')
-       ax1.plot(purusuz_yol[:, 0], label='Pürüzsüz Yol (X)')
-       ax1.set_ylabel("X piksel konumu")
-       ax1.legend()
-
-       ax2.plot(titrek_yol[:, 1], label='Titrek Yol (Y)')
-       ax2.plot(purusuz_yol[:, 1], label='Pürüzsüz Yol (Y)')
-       ax2.set_xlabel("Kare Sayısı")
-       ax2.set_ylabel("Y Piksel Konumu")
-       ax2.legend()
-       fig.canvas.manager.set_window_title('Yörünge Grafiği')
-
-def plot_transforms(donusumler, radians=False):
-    if donusumler is None:
-        raise AttributeError("Çizilecek bir dönüşüm verisi bulunamadı.")
-    
-    with plt.style.context('ggplot'):
-        fig, (ax1, ax2) = plt.subplots(nrows=2, sharex='all')
-        fig.suptitle('Kareler Arası Dönüşümler', fontsize=16)
-
-        # X ve Y Dönüşüm Grafiği
-        ax1.plot(donusumler[:, 0], label='dx (Piksel)')
-        ax1.plot(donusumler[:, 1], label='dy (Piksel)')
-        ax1.set_ylabel("Piksel Değişimi")
-        ax1.legend()
-    
-        # Açısal Dönüşüm Grafiği
-        if radians:
-            ax2.plot(donusumler[:, 2], label='d_aci (Radyan)')
-            ax2.set_ylabel("Radyan Değişimi")
-        else:
-            # Radyanı dereceye çevirmek daha anlaşılır olur
-            ax2.plot(np.degrees(donusumler[:, 2]), label='d_aci (Derece)')
-            ax2.set_ylabel("Derece Değişimi")
-            
-        ax2.set_xlabel("Kare Sayısı")
-        ax2.legend()
-
-        fig.canvas.manager.set_window_title('Dönüşüm Grafiği')  
-
-
-def plot_scale_both(smoothed, raw_scale):
-    if smoothed.shape[1] < 4:
-        raise ValueError("smoothed verisinde scale (4. sütun) yok.")
-    with plt.style.context('ggplot'):
-        fig, ax = plt.subplots()
-        ax.plot(raw_scale, label='s_toplam (ham)')
-        ax.plot(smoothed[:, 3], label='s (yumuşatılmış)')
-        ax.axhline(1.0, linestyle='--', linewidth=1, label='s = 1')
-        ax.set_title('Ölçek (Scale) Eğrisi')
-        ax.set_xlabel('Kare Sayısı')
-        ax.set_ylabel('Ölçek (s)')
-        ax.legend()
-        fig.canvas.manager.set_window_title('Scale Grafiği')
-
-
 
 cap = cv2.VideoCapture(0)
 fps = cap.get(cv2.CAP_PROP_FPS)
@@ -145,17 +75,10 @@ kuyruk_dx = Kuyruk()
 kuyruk_dy = Kuyruk()
 kuyruk_dteta = Kuyruk()
 kuyruk_s = Kuyruk()
-traj_ham_q = Kuyruk()
-traj_meta_q = Kuyruk()
 ham_kare_kuyruk = Kuyruk()
 transform_kuyruk = Kuyruk()
 
 
-
-transform_plot_data = []
-trajectory_plot_data = []
-smoothed_plot_data = []
-raw_scale = []
 
 logger = stabLogger("stab_log.csv")
 start_t = time.perf_counter()
@@ -171,10 +94,11 @@ s_toplam = 1.0
 
 
 while True:
+    frame_idx += 1
     t0 = time.perf_counter()
     ret, frame = cap.read()
     if not ret:
-        break
+        raise RuntimeError("Kamera kare okunamadı.")
     frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
     
@@ -189,11 +113,11 @@ while True:
         good_old = p0[st==1]
         if good_new.shape[0] < 20:
            logger.write(LogRow(
-                        frame=frame_idx+1,
+                        frame=frame_idx
                         t_sec=time.perf_counter() - start_t,
                         x_raw=x, y_raw=y, teta_raw=aci_toplam, scale_raw=s_toplam,
                         x_s=np.nan, y_s=np.nan, teta_s=np.nan, scale_s=np.nan,
-                        dx=np.nan, dy=np.nan, dteta=np.nan,
+                        dx=np.nan, dy=np.nan, d_teta=np.nan,
                         inliers=0
                         ))
            
@@ -209,7 +133,7 @@ while True:
                             t_sec=time.perf_counter() - start_t,
                             x_raw=x, y_raw=y, teta_raw=aci_toplam, scale_raw=s_toplam,
                             x_s=np.nan, y_s=np.nan, teta_s=np.nan, scale_s=np.nan,
-                            dx=np.nan, dy=np.nan, dtheta=np.nan,
+                            dx=np.nan, dy=np.nan, d_teta=np.nan,
                             inliers=0
                             ))
         
@@ -236,7 +160,7 @@ while True:
 
     if M is None or inliers is None or inliers.sum() < 20:
         p0 = cv2.goodFeaturesToTrack(frame_gray, mask=None, **gftt_params)
-        cv2.imshow("Stabilize görüntü",frame)
+        cv2.imshow("STAB",frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
         old_gray = frame_gray.copy()
@@ -253,7 +177,7 @@ while True:
     s = np.hypot(M[0,0], M[1,0])  # ölçek faktörü hesaplama
     #cv2.getRotationMatrix()
 
-    transform_plot_data.append([dx,dy,d_teta])
+    
     
     x += dx
     y += dy
@@ -261,7 +185,7 @@ while True:
     s_toplam *= s
     
     
-    traj_ham_q.ekle([x, y, aci_toplam, s_toplam])
+
     
 
     kuyruk_dx.ekle(x)
@@ -284,12 +208,7 @@ while True:
     yumusak_y = np.mean(pencere_dy)
     yumusak_aci = np.mean(pencere_dteta)
     yumusak_s   = np.mean(pencere_s) 
-    frame_idx += 1
-    traj_meta_q.ekle((
-    frame_idx,
-    [x, y, aci_toplam, s_toplam],                 
-    [yumusak_x, yumusak_y, yumusak_aci, yumusak_s]
-    ))
+    
 
 
     inliers_count = int(inliers.sum()) if inliers is not None else 0
@@ -338,17 +257,13 @@ while True:
     if ham_kare_kuyruk.boyut() >= pencere_boyutu:
         stabilize_edilecek_kare = ham_kare_kuyruk.cikar()
         eski_M_yumusak = transform_kuyruk.cikar()
-        t, ham_traj, pur_traj = traj_meta_q.cikar()
-        trajectory_plot_data.append(ham_traj[:3])     # [x,y,aci]
-        smoothed_plot_data.append(pur_traj[:4])       # [x,y,aci,s]
-        raw_scale.append(ham_traj[3])
 
         stabilize_edilmis_frame = cv2.warpAffine(stabilize_edilecek_kare, eski_M_yumusak, (w,h))
     else: 
         stabilize_edilmis_frame = np.zeros_like(frame)
 
 
-    karsilastirma_frame = np.hstack((frame,stabilize_edilmis_frame))
+    #karsilastirma_frame = np.hstack((frame,stabilize_edilmis_frame))
     #cv2.imshow("KARŞILAŞTIRMA",karsilastirma_frame) 
     cv2.imshow("STAB",stabilize_edilmis_frame)
 
@@ -367,17 +282,58 @@ while True:
     old_gray = frame_gray.copy()    
     if p0.shape[0] < 200:
         p0 = cv2.goodFeaturesToTrack(old_gray, mask=None, **gftt_params)
-    
+logger.close()    
 # --- GRAFİK ÇİZİMİ ----
-logger.close()
-titrek_yol_dizisi = np.array(trajectory_plot_data)
-puruzsuz_yol_dizisi = np.array(smoothed_plot_data)
-donusumer_dizisi = np.array(transform_plot_data)
+def plot_from_log(path="stab_log.csv"):
+    df = pd.read_csv(path)
 
-plot_trajectory(titrek_yol_dizisi, puruzsuz_yol_dizisi)
-plot_scale_both(puruzsuz_yol_dizisi, raw_scale)
-plot_transforms(donusumer_dizisi)
-plt.show()        
+    with plt.style.context("ggplot"):
+        fig, axs = plt.subplots(5, 1, figsize=(12, 16), sharex=True)
+        fig.suptitle("Video Stabilizasyon Log Analizi", fontsize=18)
+
+        # --- 1. X-Y Trajektori ---
+        axs[0].plot(df["frame"], df["x_raw"], label="x_raw", alpha=0.6)
+        axs[0].plot(df["frame"], df["x_s"], label="x_s (smooth)", linewidth=2)
+        axs[0].plot(df["frame"], df["y_raw"], label="y_raw", alpha=0.6)
+        axs[0].plot(df["frame"], df["y_s"], label="y_s (smooth)", linewidth=2)
+        axs[0].set_ylabel("Piksel Konumu")
+        axs[0].legend()
+        axs[0].set_title("Ham vs Yumuşatılmış X/Y Trajektori")
+
+        # --- 2. Açı (theta) ---
+        axs[1].plot(df["frame"], np.degrees(df["teta_raw"]), label="θ_raw (deg)", alpha=0.6)
+        axs[1].plot(df["frame"], np.degrees(df["teta_s"]), label="θ_s (smooth, deg)", linewidth=2)
+        axs[1].set_ylabel("Derece")
+        axs[1].legend()
+        axs[1].set_title("Ham vs Yumuşatılmış Açı (θ)")
+
+        # --- 3. Scale ---
+        axs[2].plot(df["frame"], df["scale_raw"], label="scale_raw", alpha=0.6)
+        axs[2].plot(df["frame"], df["scale_s"], label="scale_s (smooth)", linewidth=2)
+        axs[2].axhline(1.0, linestyle="--", color="gray", linewidth=1)
+        axs[2].set_ylabel("Ölçek Faktörü")
+        axs[2].legend()
+        axs[2].set_title("Ham vs Yumuşatılmış Ölçek")
+
+        # --- 4. Frame-to-frame transform ---
+        axs[3].plot(df["frame"], df["dx"], label="dx", alpha=0.7)
+        axs[3].plot(df["frame"], df["dy"], label="dy", alpha=0.7)
+        axs[3].plot(df["frame"], np.degrees(df["d_teta"]), label="dθ (deg)", alpha=0.7)
+        axs[3].set_ylabel("Değişim")
+        axs[3].legend()
+        axs[3].set_title("Kareler Arası Dönüşümler (dx, dy, dθ)")
+
+        # --- 5. İnliers ---
+        axs[4].plot(df["frame"], df["inliers"], label="inliers", color="tab:green")
+        axs[4].set_ylabel("Eşleşme Sayısı")
+        axs[4].set_xlabel("Frame")
+        axs[4].set_title("İnliers Sayısı (RANSAC güvenilirlik)")
+
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        plt.show()
+
+
+plot_from_log("stab_log.csv")
 
 cap.release()
 cv2.destroyAllWindows()
