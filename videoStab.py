@@ -2,7 +2,54 @@ import cv2
 import numpy as np
 from kuyruk_kutuphane.kuyruk import Kuyruk
 import matplotlib.pyplot as plt
-import time 
+import time
+import csv
+from dataclasses import dataclass
+
+
+@dataclass
+class LogRow:
+    frame: int
+    t_sec: float
+    x_raw: float; y_raw: float; teta_raw: float; scale_raw: float
+    x_s: float; y_s: float; teta_s: float; scale_s: float
+    dx: float; dy: float; d_teta: float
+    inliers: int
+
+class stabLogger:
+    def __init__(self, path:str):
+        self.f = open(path, mode='w', newline='')
+        self.w = csv.writer(self.f)
+        self.w.writerow([
+            'frame', 't_sec',
+            'x_raw', 'y_raw', 'teta_raw', 'scale_raw',
+            'x_s', 'y_s', 'teta_s', 'scale_s',
+            'dx', 'dy', 'd_teta',
+            'inliers'
+        ])
+        self.n = 0
+
+    def write(self, row:LogRow):
+        def f(x):
+        # NaN kontrolü
+            if isinstance(x, float):
+                return f"{x:.3f}"
+            return x
+    
+        self.w.writerow([
+            row.frame, f(row.t_sec),
+            f(row.x_raw), f(row.y_raw), f(row.teta_raw), f(row.scale_raw),
+            f(row.x_s), f(row.y_s), f(row.teta_s), f(row.scale_s),
+            f(row.dx), f(row.dy), f(row.d_teta),
+            row.inliers
+        ])
+        self.n += 1
+        if self.n % 60 == 0:
+           self.f.flush()
+
+    def close(self):
+        self.f.flush()
+        self.f.close()
 
 
 def plot_trajectory(titrek_yol, purusuz_yol):
@@ -103,14 +150,17 @@ traj_meta_q = Kuyruk()
 ham_kare_kuyruk = Kuyruk()
 transform_kuyruk = Kuyruk()
 
-frame_idx = -1
+
 
 transform_plot_data = []
 trajectory_plot_data = []
 smoothed_plot_data = []
 raw_scale = []
 
+logger = stabLogger("stab_log.csv")
+start_t = time.perf_counter()
 
+frame_idx = -1
 
 
 
@@ -138,13 +188,31 @@ while True:
         good_new = p1[st==1]
         good_old = p0[st==1]
         if good_new.shape[0] < 20:
-            p0 = cv2.goodFeaturesToTrack(frame_gray, mask=None, **gftt_params)
-            old_gray = frame_gray.copy() 
-            cv2.imshow("STAB",frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-            continue
+           logger.write(LogRow(
+                        frame=frame_idx+1,
+                        t_sec=time.perf_counter() - start_t,
+                        x_raw=x, y_raw=y, teta_raw=aci_toplam, scale_raw=s_toplam,
+                        x_s=np.nan, y_s=np.nan, teta_s=np.nan, scale_s=np.nan,
+                        dx=np.nan, dy=np.nan, dteta=np.nan,
+                        inliers=0
+                        ))
+           
+           p0 = cv2.goodFeaturesToTrack(frame_gray, mask=None, **gftt_params)
+           old_gray = frame_gray.copy() 
+           cv2.imshow("STAB",frame)
+           if cv2.waitKey(1) & 0xFF == ord('q'):
+               break
+           continue
     else:
+        logger.write(LogRow(
+                           frame=frame_idx+1,
+                            t_sec=time.perf_counter() - start_t,
+                            x_raw=x, y_raw=y, teta_raw=aci_toplam, scale_raw=s_toplam,
+                            x_s=np.nan, y_s=np.nan, teta_s=np.nan, scale_s=np.nan,
+                            dx=np.nan, dy=np.nan, dtheta=np.nan,
+                            inliers=0
+                            ))
+        
         p0 = cv2.goodFeaturesToTrack(frame_gray, mask=None, **gftt_params)
         old_gray = frame_gray.copy() 
         cv2.imshow("STAB",frame)
@@ -224,6 +292,19 @@ while True:
     ))
 
 
+    inliers_count = int(inliers.sum()) if inliers is not None else 0
+    t_sec = time.perf_counter() - start_t
+
+    logger.write(LogRow(
+        frame=frame_idx,
+        t_sec=t_sec,
+        x_raw=x, y_raw=y, teta_raw=aci_toplam, scale_raw=s_toplam,
+        x_s=yumusak_x, y_s=yumusak_y, teta_s=yumusak_aci, scale_s=yumusak_s,
+        dx=dx, dy=dy, d_teta=d_teta,
+        inliers=inliers_count
+    ))
+
+
     ## ----YUMUŞATMA HESAPLAMALARI SON ----
 
 
@@ -288,7 +369,7 @@ while True:
         p0 = cv2.goodFeaturesToTrack(old_gray, mask=None, **gftt_params)
     
 # --- GRAFİK ÇİZİMİ ----
-
+logger.close()
 titrek_yol_dizisi = np.array(trajectory_plot_data)
 puruzsuz_yol_dizisi = np.array(smoothed_plot_data)
 donusumer_dizisi = np.array(transform_plot_data)
